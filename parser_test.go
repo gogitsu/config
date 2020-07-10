@@ -19,7 +19,7 @@ type YAMLCfg struct {
 }
 
 func TestJSONParser(t *testing.T) {
-	yamlP := YAMLParser{}
+	yamlP := NewParser("yaml")
 	cfg := YAMLCfg{}
 	yamlP.Parse(strings.NewReader(yamlData), &cfg)
 

@@ -45,25 +45,25 @@ type TOMLParser struct{}
 type ENVParser struct{}
 
 // Parse parses variables from YAML into the input struct.
-func (yp YAMLParser) Parse(r io.Reader, s interface{}) error {
+func (yp *YAMLParser) Parse(r io.Reader, s interface{}) error {
 	return yaml.NewDecoder(r).Decode(s)
 }
 
 // Parse parses variables from JSON into the input struct.
-func (jp JSONParser) Parse(r io.Reader, s interface{}) error {
+func (jp *JSONParser) Parse(r io.Reader, s interface{}) error {
 	return json.NewDecoder(r).Decode(s)
 }
 
 // Parse parses variables from TOML into the input struct.
 // Here we skip returned metadata.
-func (tp TOMLParser) Parse(r io.Reader, s interface{}) error {
+func (tp *TOMLParser) Parse(r io.Reader, s interface{}) error {
 	_, err := toml.DecodeReader(r, s)
 	return err
 }
 
 // Parse parses variables from ENV into the input struct.
 // It does not fill the struct, but set variables into the env.
-func (ep ENVParser) Parse(r io.Reader, s interface{}) error {
+func (ep *ENVParser) Parse(r io.Reader, s interface{}) error {
 	vars, err := godotenv.Parse(r)
 	if err != nil {
 		return err
@@ -73,4 +73,22 @@ func (ep ENVParser) Parse(r io.Reader, s interface{}) error {
 		os.Setenv(env, val)
 	}
 	return nil
+}
+
+// NewParser return a new Parser according to the config file format.
+func NewParser(format string) Parser {
+	var p Parser
+	switch format {
+	case "yaml", ".yaml", ".yml":
+		p = &YAMLParser{}
+	case "json", ".json":
+		p = &JSONParser{}
+	case "toml", ".toml":
+		p = &TOMLParser{}
+	case "env", ".env":
+		p = &ENVParser{}
+	default:
+		panic("'%s' file format not supported")
+	}
+	return p
 }
