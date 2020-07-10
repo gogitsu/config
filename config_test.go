@@ -16,8 +16,8 @@ type JSONConfig struct {
 }
 
 func TestConfigurator(t *testing.T) {
-	c := NewConfiguratorFor("json")
-	t.Logf("c.paths: %+v, c.fileName: '%s'", c.paths, c.fileName)
+	c := NewConfigurator().WithFormat("json").WithFileNamePrefix("CFG")
+	t.Logf("c.paths: %+v, c.fileName: '%s'", c.paths, c.FileName())
 	cfg := JSONConfig{}
 	err := c.Parser().Parse(strings.NewReader(jsonData), &cfg)
 	if err != nil {

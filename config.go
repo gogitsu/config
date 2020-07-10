@@ -18,7 +18,7 @@ import (
 
 var defaultPaths = []string{"../config", ".", "./config"}
 
-const defaultFileNamePrefix = "config-"
+const defaultFileNamePrefix = "config"
 const defaultFileType = "yaml"
 
 // metadata is the struct where all the meta information
@@ -38,9 +38,11 @@ type metadata struct {
 
 // Configurator is the main struct to access configuration functionalities.
 type Configurator struct {
-	parser   Parser
-	paths    []string
-	fileName string
+	env            string
+	parser         Parser
+	paths          []string
+	fileNamePrefix string
+	fileType       string
 }
 
 // NewConfigurator returns a new Configurator instance.
@@ -50,22 +52,34 @@ func NewConfigurator() *Configurator {
 	if env == "" {
 		env = "dev"
 	}
-	fileName := defaultFileNamePrefix + env + "." + defaultFileType
+	fileNamePrefix := defaultFileNamePrefix + "-" + env
 
-	return &Configurator{paths: defaultPaths, fileName: fileName}
+	return &Configurator{
+		env:            env,
+		paths:          defaultPaths,
+		fileNamePrefix: fileNamePrefix,
+		fileType:       defaultFileType,
+	}
 }
 
 // NewConfiguratorFor returns a new Configurator with
 // a configured parser for the input format.
 func NewConfiguratorFor(format string) *Configurator {
-	c := NewConfigurator()
-	c.parser = NewParser(format)
+	c := NewConfigurator().WithFormat(format)
+	// c.parser = NewParser(format)
 	return c
 }
 
 // WithFormat configure the internal Parser according to the input format.
 func (c *Configurator) WithFormat(format string) *Configurator {
+	c.fileType = format
 	c.parser = NewParser(format)
+	return c
+}
+
+// WithFileNamePrefix .
+func (c *Configurator) WithFileNamePrefix(prefix string) *Configurator {
+	c.fileNamePrefix = prefix + "-" + c.env
 	return c
 }
 
@@ -78,6 +92,11 @@ func (c *Configurator) WithParser(parser Parser) *Configurator {
 // Parser returns the internal parser instance.
 func (c *Configurator) Parser() Parser {
 	return c.parser
+}
+
+// FileName returns the configuration filename.
+func (c *Configurator) FileName() string {
+	return c.fileNamePrefix + "." + c.fileType
 }
 
 // func (c *Configurator) readStructMetadata(cfg interface{}) *metadata {
