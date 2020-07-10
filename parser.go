@@ -79,7 +79,7 @@ func (ep *ENVParser) Parse(r io.Reader, s interface{}) error {
 func NewParser(format string) Parser {
 	var p Parser
 	switch format {
-	case "yaml", ".yaml", ".yml":
+	case "yaml", "yml", ".yaml", ".yml":
 		p = &YAMLParser{}
 	case "json", ".json":
 		p = &JSONParser{}

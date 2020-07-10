@@ -11,7 +11,15 @@
 // Package config implements configuration components of gogitsu lib.
 package config
 
-import "reflect"
+import (
+	"os"
+	"reflect"
+)
+
+var defaultPaths = []string{"../config", ".", "./config"}
+
+const defaultFileNamePrefix = "config-"
+const defaultFileType = "yaml"
 
 // metadata is the struct where all the meta information
 // about a configuration field are stored.
@@ -30,19 +38,29 @@ type metadata struct {
 
 // Configurator is the main struct to access configuration functionalities.
 type Configurator struct {
-	parser Parser
+	parser   Parser
+	paths    []string
+	fileName string
 }
 
 // NewConfigurator returns a new Configurator instance.
 // Here we not set a parser.
 func NewConfigurator() *Configurator {
-	return &Configurator{}
+	env := os.Getenv("ENV")
+	if env == "" {
+		env = "dev"
+	}
+	fileName := defaultFileNamePrefix + env + "." + defaultFileType
+
+	return &Configurator{paths: defaultPaths, fileName: fileName}
 }
 
 // NewConfiguratorFor returns a new Configurator with
 // a configured parser for the input format.
 func NewConfiguratorFor(format string) *Configurator {
-	return &Configurator{parser: NewParser(format)}
+	c := NewConfigurator()
+	c.parser = NewParser(format)
+	return c
 }
 
 // WithFormat configure the internal Parser according to the input format.
@@ -55,6 +73,11 @@ func (c *Configurator) WithFormat(format string) *Configurator {
 func (c *Configurator) WithParser(parser Parser) *Configurator {
 	c.parser = parser
 	return c
+}
+
+// Parser returns the internal parser instance.
+func (c *Configurator) Parser() Parser {
+	return c.parser
 }
 
 // func (c *Configurator) readStructMetadata(cfg interface{}) *metadata {
