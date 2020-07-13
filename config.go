@@ -12,6 +12,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"reflect"
 )
@@ -83,6 +84,12 @@ func (c *Configurator) WithFileNamePrefix(prefix string) *Configurator {
 	return c
 }
 
+// WithPath adds a path into the serach paths.
+func (c *Configurator) WithPath(path string) *Configurator {
+	c.paths = append(c.paths, path)
+	return c
+}
+
 // WithParser configure the internal Parser.
 func (c *Configurator) WithParser(parser Parser) *Configurator {
 	c.parser = parser
@@ -97,6 +104,35 @@ func (c *Configurator) Parser() Parser {
 // FileName returns the configuration filename.
 func (c *Configurator) FileName() string {
 	return c.fileNamePrefix + "." + c.fileType
+}
+
+func (c *Configurator) parse(cfg interface{}) error {
+	for _, p := range c.paths {
+		if err := c.parseFile(p+"/"+c.FileName(), cfg); err == nil {
+			return nil
+		} else if e, ok := err.(*os.PathError); ok {
+			return e
+		}
+	}
+	return nil
+}
+
+func (c *Configurator) parseFile(path string, cfg interface{}) error {
+	f, err := os.OpenFile(path, os.O_RDONLY|os.O_SYNC, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	err = c.Parser().Parse(f, cfg)
+	if err != nil {
+		if e, ok := err.(*os.PathError); ok {
+			return e
+		}
+		return fmt.Errorf("config file parsing error: %s", err.Error())
+	}
+
+	return nil
 }
 
 // func (c *Configurator) readStructMetadata(cfg interface{}) *metadata {
