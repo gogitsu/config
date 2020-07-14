@@ -15,26 +15,50 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strconv"
+	"strings"
+	"time"
 )
 
 var defaultPaths = []string{"../config", ".", "./config"}
 
-const defaultFileNamePrefix = "config"
-const defaultFileType = "yaml"
+const (
+	// DefaultSeparator is a default list and map separator character
+	DefaultSeparator      = ","
+	defaultFileType       = "yaml"
+	defaultFileNamePrefix = "config"
+)
 
-// metadata is the struct where all the meta information
-// about a configuration field are stored.
-type metadata struct {
-	env   []string
-	field struct {
-		name     string
-		value    reflect.Value
-		defValue *string
-	}
-	layout      *string
-	separator   string
-	description string
-	required    bool
+const (
+	// TagEnv is the Name of the environment variable or a list of names
+	TagEnv = "env"
+	// TagEnvLayout is the Value parsing layout (for types like time.Time)
+	TagEnvLayout = "env-layout"
+	// TagEnvDefault is the Default value
+	TagEnvDefault = "env-default"
+	// TagEnvSeparator is the Custom list and map separator
+	TagEnvSeparator = "env-separator"
+	// TagEnvDescription is the Environment variable description
+	TagEnvDescription = "env-description"
+	// TagEnvRequired is the Flag to mark a field as required
+	TagEnvRequired = "env-required"
+)
+
+// Setter is an interface for a custom value setter.
+//
+// To implement a custom value setter you need to add a SetValue function to your type that will receive a string raw value:
+//
+// 	type MyField string
+//
+// 	func (f *MyField) SetValue(s string) error {
+// 		if s == "" {
+// 			return fmt.Errorf("field value can't be empty")
+// 		}
+// 		*f = MyField("my field is: " + s)
+// 		return nil
+// 	}
+type Setter interface {
+	SetValue(string) error
 }
 
 // Configurator is the main struct to access configuration functionalities.
@@ -106,9 +130,10 @@ func (c *Configurator) FileName() string {
 	return c.fileNamePrefix + "." + c.fileType
 }
 
-func (c *Configurator) parse(cfg interface{}) error {
+// Load reads configuration from default file into the cfg structure.
+func (c *Configurator) Load(cfg interface{}) error {
 	for _, p := range c.paths {
-		if err := c.parseFile(p+"/"+c.FileName(), cfg); err == nil {
+		if err := c.LoadFromFile(p+"/"+c.FileName(), cfg); err == nil {
 			return nil
 		} else if e, ok := err.(*os.PathError); ok {
 			return e
@@ -117,7 +142,8 @@ func (c *Configurator) parse(cfg interface{}) error {
 	return nil
 }
 
-func (c *Configurator) parseFile(path string, cfg interface{}) error {
+// LoadFromFile reads configuration from the specified file into the cfg structure.
+func (c *Configurator) LoadFromFile(path string, cfg interface{}) error {
 	f, err := os.OpenFile(path, os.O_RDONLY|os.O_SYNC, 0)
 	if err != nil {
 		return err
@@ -135,6 +161,268 @@ func (c *Configurator) parseFile(path string, cfg interface{}) error {
 	return nil
 }
 
-// func (c *Configurator) readStructMetadata(cfg interface{}) *metadata {
+func (c *Configurator) readStructMetadata(cfgRoot interface{}) ([]metadata, error) {
+	cfgStack := []interface{}{cfgRoot}
+	metas := make([]metadata, 0)
 
-// }
+	for i := 0; i < len(cfgStack); i++ {
+		s := reflect.ValueOf(cfgStack[i])
+		sType := s.Kind()
+
+		// unwrap pointer
+		if sType == reflect.Ptr {
+			s = s.Elem()
+		}
+
+		// process only structures
+		if sType != reflect.Struct {
+			return nil, fmt.Errorf("wrong type %v", sType)
+		}
+		sTypeInfo := s.Type()
+
+		// read tags
+		for idx := 0; idx < s.NumField(); idx++ {
+			fType := sTypeInfo.Field(idx)
+			var (
+				defValue  *string
+				layout    *string
+				separator string
+			)
+
+			// process nested structure (except of time.Time)
+			if fld := s.Field(idx); fld.Kind() == reflect.Struct {
+				// add structure to parsing stack
+				if fld.Type() != reflect.TypeOf(time.Time{}) {
+					cfgStack = append(cfgStack, fld.Addr().Interface())
+					continue
+				}
+				// process time.Time
+				if l, ok := fType.Tag.Lookup(TagEnvLayout); ok {
+					layout = &l
+				}
+			}
+
+			// check if the field value can be changed
+			if !s.Field(idx).CanSet() {
+				continue
+			}
+
+			if def, ok := fType.Tag.Lookup(TagEnvDefault); ok {
+				defValue = &def
+			}
+
+			if sep, ok := fType.Tag.Lookup(TagEnvSeparator); ok {
+				separator = sep
+			} else {
+				separator = DefaultSeparator
+			}
+
+			_, required := fType.Tag.Lookup(TagEnvRequired)
+			envList := make([]string, 0)
+
+			if envs, ok := fType.Tag.Lookup(TagEnv); ok && len(envs) != 0 {
+				envList = strings.Split(envs, DefaultSeparator)
+			}
+
+			metas = append(metas, metadata{
+				env:         envList,
+				fieldName:   s.Type().Field(idx).Name,
+				fieldValue:  s.Field(idx),
+				defValue:    defValue,
+				layout:      layout,
+				separator:   separator,
+				description: fType.Tag.Get(TagEnvDescription),
+				required:    required,
+			})
+		}
+	}
+
+	return metas, nil
+}
+
+func (c *Configurator) readEnvVars(cfg interface{}) error {
+	metaInfo, err := c.readStructMetadata(cfg)
+	if err != nil {
+		return err
+	}
+
+	for _, meta := range metaInfo {
+		var rawValue *string
+
+		for _, env := range meta.env {
+			if value, ok := os.LookupEnv(env); ok {
+				rawValue = &value
+				break
+			}
+		}
+
+		if rawValue == nil && meta.required && meta.isFieldValueZero() {
+			err := fmt.Errorf("field %q is required but the value is not provided",
+				meta.fieldName)
+			return err
+		}
+
+		if rawValue == nil && meta.isFieldValueZero() {
+			rawValue = meta.defValue
+		}
+
+		if rawValue == nil {
+			continue
+		}
+
+		if err := c.parseValue(meta.fieldValue, *rawValue, meta.separator, meta.layout); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// parseValue parses value into the corresponding field.
+// In case of maps and slices it uses provided separator to split raw value string
+func (c *Configurator) parseValue(field reflect.Value, value, sep string, layout *string) error {
+	// TODO: simplify recursion
+
+	if field.CanInterface() {
+		if cs, ok := field.Interface().(Setter); ok {
+			return cs.SetValue(value)
+		} else if csp, ok := field.Addr().Interface().(Setter); ok {
+			return csp.SetValue(value)
+		}
+	}
+
+	valueType := field.Type()
+
+	switch valueType.Kind() {
+	// parse string value
+	case reflect.String:
+		field.SetString(value)
+
+	// parse boolean value
+	case reflect.Bool:
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return err
+		}
+		field.SetBool(b)
+
+	// parse integer (or time) value
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if field.Kind() == reflect.Int64 && valueType.PkgPath() == "time" && valueType.Name() == "Duration" {
+			// try to parse time
+			d, err := time.ParseDuration(value)
+			if err != nil {
+				return err
+			}
+			field.SetInt(int64(d))
+
+		} else {
+			// parse regular integer
+			number, err := strconv.ParseInt(value, 0, valueType.Bits())
+			if err != nil {
+				return err
+			}
+			field.SetInt(number)
+		}
+
+	// parse unsigned integer value
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		number, err := strconv.ParseUint(value, 0, valueType.Bits())
+		if err != nil {
+			return err
+		}
+		field.SetUint(number)
+
+	// parse floating point value
+	case reflect.Float32, reflect.Float64:
+		number, err := strconv.ParseFloat(value, valueType.Bits())
+		if err != nil {
+			return err
+		}
+		field.SetFloat(number)
+
+	// parse sliced value
+	case reflect.Slice:
+		sliceValue, err := c.parseSlice(valueType, value, sep, layout)
+		if err != nil {
+			return err
+		}
+
+		field.Set(*sliceValue)
+
+	// parse mapped value
+	case reflect.Map:
+		mapValue, err := c.parseMap(valueType, value, sep, layout)
+		if err != nil {
+			return err
+		}
+
+		field.Set(*mapValue)
+
+	case reflect.Struct:
+		// process time.Time only
+		if valueType.PkgPath() == "time" && valueType.Name() == "Time" {
+
+			var l string
+			if layout != nil {
+				l = *layout
+			} else {
+				l = time.RFC3339
+			}
+			val, err := time.Parse(l, value)
+			if err != nil {
+				return err
+			}
+			field.Set(reflect.ValueOf(val))
+		}
+
+	default:
+		return fmt.Errorf("unsupported type %s.%s", valueType.PkgPath(), valueType.Name())
+	}
+
+	return nil
+}
+
+// parseSlice parses value into a slice of given type
+func (c *Configurator) parseSlice(valueType reflect.Type, value string, sep string, layout *string) (*reflect.Value, error) {
+	sliceValue := reflect.MakeSlice(valueType, 0, 0)
+	if valueType.Elem().Kind() == reflect.Uint8 {
+		sliceValue = reflect.ValueOf([]byte(value))
+	} else if len(strings.TrimSpace(value)) != 0 {
+		values := strings.Split(value, sep)
+		sliceValue = reflect.MakeSlice(valueType, len(values), len(values))
+
+		for i, val := range values {
+			if err := c.parseValue(sliceValue.Index(i), val, sep, layout); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return &sliceValue, nil
+}
+
+// parseMap parses value into a map of given type
+func (c *Configurator) parseMap(valueType reflect.Type, value string, sep string, layout *string) (*reflect.Value, error) {
+	mapValue := reflect.MakeMap(valueType)
+	if len(strings.TrimSpace(value)) != 0 {
+		pairs := strings.Split(value, sep)
+		for _, pair := range pairs {
+			kvPair := strings.SplitN(pair, ":", 2)
+			if len(kvPair) != 2 {
+				return nil, fmt.Errorf("invalid map item: %q", pair)
+			}
+			k := reflect.New(valueType.Key()).Elem()
+			err := c.parseValue(k, kvPair[0], sep, layout)
+			if err != nil {
+				return nil, err
+			}
+			v := reflect.New(valueType.Elem()).Elem()
+			err = c.parseValue(v, kvPair[1], sep, layout)
+			if err != nil {
+				return nil, err
+			}
+			mapValue.SetMapIndex(k, v)
+		}
+	}
+	return &mapValue, nil
+}
