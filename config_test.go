@@ -37,7 +37,7 @@ func TestConfigurator(t *testing.T) {
 
 func TestConfiguratorFromFile(t *testing.T) {
 	os.Setenv("ENV", "test")
-	os.Setenv("SVC_NAME", "service-name-from-env")
+	// os.Setenv("SVC_NAME", "service-name-from-env")
 	var config *Cfg = &Cfg{}
 	c := NewConfiguratorFor("yaml")
 	err := c.Load(config)

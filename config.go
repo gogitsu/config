@@ -12,7 +12,9 @@
 package config
 
 import (
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"strconv"
@@ -158,7 +160,7 @@ func (c *Configurator) LoadFromFile(path string, cfg interface{}) error {
 		return fmt.Errorf("config file parsing error: %s", err.Error())
 	}
 
-	return nil
+	return c.readEnvVars(cfg)
 }
 
 func (c *Configurator) readStructMetadata(cfgRoot interface{}) ([]metadata, error) {
@@ -167,16 +169,15 @@ func (c *Configurator) readStructMetadata(cfgRoot interface{}) ([]metadata, erro
 
 	for i := 0; i < len(cfgStack); i++ {
 		s := reflect.ValueOf(cfgStack[i])
-		sType := s.Kind()
 
 		// unwrap pointer
-		if sType == reflect.Ptr {
+		if s.Kind() == reflect.Ptr {
 			s = s.Elem()
 		}
 
 		// process only structures
-		if sType != reflect.Struct {
-			return nil, fmt.Errorf("wrong type %v", sType)
+		if s.Kind() != reflect.Struct {
+			return nil, fmt.Errorf("wrong type %v", s.Kind())
 		}
 		sTypeInfo := s.Type()
 
@@ -243,6 +244,7 @@ func (c *Configurator) readStructMetadata(cfgRoot interface{}) ([]metadata, erro
 func (c *Configurator) readEnvVars(cfg interface{}) error {
 	metaInfo, err := c.readStructMetadata(cfg)
 	if err != nil {
+		fmt.Println(err)
 		return err
 	}
 
@@ -425,4 +427,73 @@ func (c *Configurator) parseMap(valueType reflect.Type, value string, sep string
 		}
 	}
 	return &mapValue, nil
+}
+
+// GetDescription returns a description of environment variables.
+// You can provide a custom header text.
+func (c *Configurator) GetDescription(cfg interface{}, headerText *string) (string, error) {
+	meta, err := c.readStructMetadata(cfg)
+	if err != nil {
+		return "", err
+	}
+
+	var header, description string
+
+	if headerText != nil {
+		header = *headerText
+	} else {
+		header = "Environment variables:"
+	}
+
+	for _, m := range meta {
+		if len(m.env) == 0 {
+			continue
+		}
+
+		for idx, env := range m.env {
+
+			elemDescription := fmt.Sprintf("\n  %s %s", env, m.fieldValue.Kind())
+			if idx > 0 {
+				elemDescription += fmt.Sprintf(" (alternative to %s)", m.env[0])
+			}
+			elemDescription += fmt.Sprintf("\n    \t%s", m.description)
+			if m.defValue != nil {
+				elemDescription += fmt.Sprintf(" (default %q)", *m.defValue)
+			}
+			description += elemDescription
+		}
+	}
+
+	if description != "" {
+		return header + description, nil
+	}
+	return "", nil
+}
+
+// Usage returns a configuration usage help.
+// Other usage instructions can be wrapped in and executed before this usage function.
+// The default output is STDERR.
+func (c *Configurator) Usage(cfg interface{}, headerText *string, usageFuncs ...func()) func() {
+	return c.FUsage(os.Stderr, cfg, headerText, usageFuncs...)
+}
+
+// FUsage prints configuration help into the custom output.
+// Other usage instructions can be wrapped in and executed before this usage function
+func (c *Configurator) FUsage(w io.Writer, cfg interface{}, headerText *string, usageFuncs ...func()) func() {
+	return func() {
+		for _, fn := range usageFuncs {
+			fn()
+		}
+
+		_ = flag.Usage
+
+		text, err := c.GetDescription(cfg, headerText)
+		if err != nil {
+			return
+		}
+		if len(usageFuncs) > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintln(w, text)
+	}
 }
