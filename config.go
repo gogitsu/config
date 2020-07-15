@@ -66,6 +66,7 @@ type Setter interface {
 // Configurator is the main struct to access configuration functionalities.
 type Configurator struct {
 	env            string
+	envPrefix      string
 	parser         Parser
 	paths          []string
 	fileNamePrefix string
@@ -83,6 +84,7 @@ func NewConfigurator() *Configurator {
 
 	return &Configurator{
 		env:            env,
+		envPrefix:      "",
 		paths:          defaultPaths,
 		fileNamePrefix: fileNamePrefix,
 		fileType:       defaultFileType,
@@ -94,6 +96,15 @@ func NewConfigurator() *Configurator {
 func NewConfiguratorFor(format string) *Configurator {
 	c := NewConfigurator().WithFormat(format)
 	// c.parser = NewParser(format)
+	return c
+}
+
+// WithEnvPrefix configure the env vars prefix.
+func (c *Configurator) WithEnvPrefix(envPrefix string) *Configurator {
+	if !strings.HasSuffix(envPrefix, "_") {
+		envPrefix = envPrefix + "_"
+	}
+	c.envPrefix = envPrefix
 	return c
 }
 
@@ -252,7 +263,7 @@ func (c *Configurator) readEnvVars(cfg interface{}) error {
 		var rawValue *string
 
 		for _, env := range meta.env {
-			if value, ok := os.LookupEnv(env); ok {
+			if value, ok := os.LookupEnv(c.envPrefix + env); ok {
 				rawValue = &value
 				break
 			}
