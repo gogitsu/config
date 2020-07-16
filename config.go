@@ -145,11 +145,15 @@ func (c *Configurator) FileName() string {
 
 // Load reads configuration from default file into the cfg structure.
 func (c *Configurator) Load(cfg interface{}) error {
+	var err error
 	for _, p := range c.paths {
-		if err := c.LoadFromFile(p+"/"+c.FileName(), cfg); err == nil {
+		err = c.LoadFromFile(p+"/"+c.FileName(), cfg)
+		if err == nil {
 			return nil
 		} else if e, ok := err.(*os.PathError); ok {
 			return e
+		} else {
+			return fmt.Errorf("error parsing file %s: %v", p+"/"+c.FileName(), err)
 		}
 	}
 	return nil
