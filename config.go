@@ -22,7 +22,7 @@ import (
 	"time"
 )
 
-var defaultPaths = []string{"../config", ".", "./config"}
+var defaultPaths = []string{".", "./config"}
 
 const (
 	// DefaultSeparator is a default list and map separator character
@@ -147,11 +147,15 @@ func (c *Configurator) FileName() string {
 func (c *Configurator) Load(cfg interface{}) error {
 	var err error
 	for _, p := range c.paths {
+		fmt.Printf("Loading from %s\n", p+"/"+c.FileName())
 		err = c.LoadFromFile(p+"/"+c.FileName(), cfg)
+		fmt.Printf("error: %+v\n", err)
 		if err == nil {
+			fmt.Print("returning nil")
 			return nil
 		}
 	}
+	fmt.Printf("returning error: %+v\n", err)
 	return err
 }
 
