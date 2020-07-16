@@ -150,13 +150,9 @@ func (c *Configurator) Load(cfg interface{}) error {
 		err = c.LoadFromFile(p+"/"+c.FileName(), cfg)
 		if err == nil {
 			return nil
-		} else if e, ok := err.(*os.PathError); ok {
-			return e
-		} else {
-			return fmt.Errorf("error parsing file %s: %v", p+"/"+c.FileName(), err)
 		}
 	}
-	return nil
+	return err
 }
 
 // LoadFromFile reads configuration from the specified file into the cfg structure.
